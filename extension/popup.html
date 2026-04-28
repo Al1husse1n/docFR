@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk to API</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="logo">💬</div>
+        <div class="header-text">
+            <h1>Talk to API</h1>
+            <p id="page-title">Loading page...</p>
+        </div>
+        <div class="status">
+            <span class="dot"></span> READY
+        </div>
+    </header>
+
+    <!-- Chat Area -->
+    <div id="chat-container">
+        <!-- Messages added by JS -->
+    </div>
+
+    <!-- Input Area -->
+    <div class="input-area">
+        <form id="message-form">
+            <input 
+                id="message-input"
+                type="text" 
+                placeholder="Ask anything about this documentation..."
+            >
+            <button type="submit">↑</button>
+        </form>
+        <p class="footer-text">
+            Only the current page is analyzed • Powered by your FastAPI backend
+        </p>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
