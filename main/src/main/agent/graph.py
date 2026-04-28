@@ -1,13 +1,18 @@
 from typing import TypedDict, Annotated, Sequence
-from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage, AIMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
-from langgraph.graph import StateGraph, End
+from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode 
 from dotenv import load_dotenv
-from .helper_functions import *
+from .helper_functions import (
+    no_doc_similarity_search,
+    format_search_results,
+    openapi_schema_similarity_search,
+    format_openapi_results
+)
 
 load_dotenv()
 
@@ -43,7 +48,8 @@ llm = ChatOllama(
 )
 
 
-
+def initialize(state: AgentState) -> AgentState:
+    return state
 
 def no_doc_answer(state: AgentState) -> AgentState:
 
@@ -182,9 +188,81 @@ Input - The content or information from the webpage you answer from is
 
 
 def json_hidden_answer(state: AgentState) -> AgentState:
-    pass
+    if not state.get("messages") or len(state["messages"]) == 0:
+        return {"messages": [AIMessage(content="No question found.")]}
+    
+    search_result = openapi_schema_similarity_search(
+        question=state["messages"][-1].content,
+        openapi_schema=state.get("openapi_schema")
+    )
+
+    formatted_result = format_openapi_results(search_result)
+
+    system_content = f"""
+You are an AI assistant that helps users understand APIs using a structured OpenAPI (Swagger) specification.
+
+The OpenAPI schema you received was extracted from a hidden JSON source on the webpage. This schema is the MOST reliable and authoritative representation of the API.
+
+THe OpenAPI schema is as follows: {formatted_result}
+
+Your job is to:
+
+1. Answer the user's question using ONLY the provided OpenAPI schema.
+2. Identify relevant:
+
+   * Endpoint paths (e.g., /users)
+   * HTTP methods (GET, POST, etc.)
+   * Parameters (query, path, body)
+   * Request body structure (if available)
+   * Authentication requirements (if defined)
+3. Provide a clear and precise answer based strictly on the schema.
+
+STRICT RULES:
+
+* Do NOT hallucinate or invent endpoints, parameters, or behaviors.
+* Do NOT rely on general knowledge or assumptions.
+* Do NOT reference webpage text — use ONLY the OpenAPI schema.
+* If the requested information is not present, say:
+  “This API specification does not include information about this request.”
+
+WHEN ANSWERING:
+
+* Always include:
+
+  * HTTP method
+  * Endpoint path
+* If available, include:
+
+  * Required parameters
+  * Request body fields
+  * Authentication details
+* Provide a short example (e.g., curl or JSON) when possible.
+
+IF MULTIPLE ENDPOINTS MATCH:
+
+* Return the most relevant ones (limit to a few)
+
+TONE:
+
+* Technical, precise, and concise
+* No unnecessary explanation
+
+OUTPUT FORMAT:
+
+* Direct answer
+* Relevant endpoint(s)
+* Optional example
+
+""" 
+    
+    system_prompt = SystemMessage(content= system_content)
+    response = llm.invoke([system_prompt] + state["messages"])
+
+    return {"messages" : [response]}
 
 def json_not_hidden_answer(state: AgentState) -> AgentState:
+    if not state.get("messages") or len(state["messages"]) == 0:
+        return {"messages": [AIMessage(content="No question found.")]}
 
     search_result = openapi_schema_similarity_search(
         question=state["messages"][-1].content,
@@ -249,15 +327,184 @@ Output format:
 
     return {"messages" : [response]}
 
+def json_not_found_answer(state: AgentState) -> AgentState:
+    if not state.get("messages") or len(state["messages"]) == 0:
+        return {"messages": [AIMessage(content="No question found.")]}
+
+    search_results = no_doc_similarity_search(
+        question= state['messages'][-1].content,
+        content= state.get("content", ""),
+        headings= state.get("headings", []),
+        codeblocks= state.get("code_blocks", []),
+        links= state.get("links", [])
+    )
+
+    context = format_search_results(search_results)
+
+    system_content = f"""
+You are an AI assistant that helps users understand APIs from a Swagger/OpenAPI documentation interface when the underlying JSON schema is NOT accessible.
+
+The current page appears to be an API documentation UI (e.g., Swagger UI), but no structured OpenAPI JSON was found. Therefore, you must rely ONLY on the visible content extracted from the page.
+
+Context/information you answer from: {context}
+
+Your job is to:
+
+1. Extract and interpret API information from the provided content.
+2. Identify:
+
+   * Endpoint paths (e.g., /users)
+   * HTTP methods (GET, POST, etc.)
+   * Descriptions or summaries
+   * Parameters (if visible)
+   * Request body fields (if visible)
+3. Answer the user's question based ONLY on the visible content.
+
+STRICT RULES:
+
+* Do NOT assume or invent endpoints that are not present in the content.
+* Do NOT rely on general API knowledge.
+* Do NOT claim full accuracy — this is a best-effort extraction.
+* If the information is unclear or incomplete, say so.
+
+WHEN ANSWERING:
+
+* Include endpoint and method if available
+* Prefer exact text or close paraphrasing from the content
+* If multiple endpoints match, list the most relevant ones
+* If the answer is not clearly present, say:
+  “This information is not clearly available in the current API documentation view.”
+
+IMPORTANT:
+
+* The documentation may be incomplete or partially rendered
+* Some endpoints or details may be missing due to lack of structured data access
+
+TONE:
+
+* Technical but cautious
+* Clear and concise
+* Avoid overconfidence
+
+OUTPUT FORMAT:
+
+* Direct answer
+* Relevant endpoint(s) (if found)
+* Optional explanation or note about uncertainty
+
+"""
+    system_prompt = SystemMessage(content= system_content)
+    response = llm.invoke([system_prompt] + state["messages"])
+
+    return {"messages" : [response]}
 
 
-
-
-
-
-
-
-
-
+#conditional edges/functions
+def decide_is_doc(state: AgentState) -> str:
+    if state["is_docs"] == True:
+        return "is_doc"
+    else:
+        return "is_not_doc"
     
+def decide_is_openapi(state: AgentState) -> str:
+    if state["is_openapi"] == True:
+        return "is_openapi"
+    else:
+        return "is_not_openapi"
 
+def decide_is_json_hidden(state: AgentState) -> str:
+    if state["is_json_hidden"] == True:
+        return "is_json_hidden"
+    else:
+        return "is_json_not_hidden"
+
+def decide_is_json_found(state: AgentState) -> str:  
+    if state["openapi_schema"] != None:
+        return "is_json_found"
+    else:
+        return "is_json_not_found"
+
+
+#graph generation
+graph = StateGraph(AgentState)
+graph.add_node("entry", initialize)
+graph.add_node("no_doc_answer", no_doc_answer)
+graph.add_node("no_openapi_answer", no_openapi_answer)
+graph.add_node("json_hidden_answer", json_hidden_answer)
+graph.add_node("json_not_hidden_answer", json_not_hidden_answer)
+graph.add_node("json_not_found_answer", json_not_found_answer)
+# Add passthrough nodes for each decision point
+graph.add_node("decide_is_openapi", lambda state: state) 
+graph.add_node("decide_is_json_hidden", lambda state: state)  
+graph.add_node("decide_is_json_found", lambda state: state)  
+
+#edges
+graph.add_conditional_edges(
+    "decide_is_json_found",
+    decide_is_json_found,
+    {
+        "is_json_found": "json_hidden_answer",
+        "is_json_not_found": "json_not_found_answer"
+    }
+)
+
+graph.add_conditional_edges(
+    "decide_is_json_hidden",
+    decide_is_json_hidden,
+    {
+       "is_json_hidden": "decide_is_json_found",
+       "is_json_not_hidden": "json_not_hidden_answer" 
+    }   
+)
+
+graph.add_conditional_edges(
+    "decide_is_openapi",
+    decide_is_openapi,
+    {
+        "is_openapi": "decide_is_json_hidden",
+        "is_not_openapi": "no_openapi_answer"
+    }
+)
+
+graph.add_conditional_edges(
+    "entry",
+    decide_is_doc,
+    {
+        "is_doc": "decide_is_openapi",
+        "is_not_doc": "no_doc_answer"
+    }
+)
+
+
+
+graph.add_edge(START, "entry")
+graph.add_edge("no_doc_answer", END)
+graph.add_edge("no_openapi_answer", END)
+graph.add_edge("json_hidden_answer", END)
+graph.add_edge("json_not_hidden_answer", END)
+graph.add_edge("json_not_found_answer", END)
+app = graph.compile()
+
+from IPython.display import Image, display
+display(Image(app.get_graph().draw_mermaid_png()))
+
+test_state = {
+    "messages": [HumanMessage(content="What is this API about?")],
+    "url": "https://example.com",
+    "title": "Test Page",
+    "content": "Some test content",
+    "headings": [],
+    "code_blocks": [],
+    "links": [],
+    "is_docs": True,
+    "is_openapi": True,
+    "is_json_hidden": False,
+    "found_hidden_json_url": None,
+    "openapi_url": None,
+    "openapi_schema": None,
+    "schema_source": None,
+    "endpoints": [],
+    "examples": []
+}
+result = app.invoke(test_state)
+print(result)
