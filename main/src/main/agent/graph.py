@@ -52,7 +52,7 @@ def initialize(state: AgentState) -> AgentState:
     return state
 
 def no_doc_answer(state: AgentState) -> AgentState:
-
+    print("no_doc_answer called")
     if not state.get("messages") or len(state["messages"]) == 0:
         return {"messages": [AIMessage(content="No question found.")]}
 
@@ -109,7 +109,7 @@ Input - The content or information from the webpage you answer from is
 
 
 def no_openapi_answer(state:AgentState) -> AgentState:
-
+    print("no openapi answer called")
     if not state.get("messages") or len(state["messages"]) == 0:
         return {"messages": [AIMessage(content="No question found.")]}
 
@@ -188,6 +188,7 @@ Input - The content or information from the webpage you answer from is
 
 
 def json_hidden_answer(state: AgentState) -> AgentState:
+    print("no json hidden answer called")
     if not state.get("messages") or len(state["messages"]) == 0:
         return {"messages": [AIMessage(content="No question found.")]}
     
@@ -261,6 +262,7 @@ OUTPUT FORMAT:
     return {"messages" : [response]}
 
 def json_not_hidden_answer(state: AgentState) -> AgentState:
+    print("json_not hidden answer called")
     if not state.get("messages") or len(state["messages"]) == 0:
         return {"messages": [AIMessage(content="No question found.")]}
 
@@ -328,6 +330,7 @@ Output format:
     return {"messages" : [response]}
 
 def json_not_found_answer(state: AgentState) -> AgentState:
+    print("json not found answer called")
     if not state.get("messages") or len(state["messages"]) == 0:
         return {"messages": [AIMessage(content="No question found.")]}
 
@@ -485,8 +488,6 @@ graph.add_edge("json_not_hidden_answer", END)
 graph.add_edge("json_not_found_answer", END)
 app = graph.compile()
 
-from IPython.display import Image, display
-display(Image(app.get_graph().draw_mermaid_png()))
 
 test_state = {
     "messages": [HumanMessage(content="What is this API about?")],
@@ -506,5 +507,4 @@ test_state = {
     "endpoints": [],
     "examples": []
 }
-result = app.invoke(test_state)
-print(result)
+

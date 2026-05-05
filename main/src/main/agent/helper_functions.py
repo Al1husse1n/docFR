@@ -3,9 +3,20 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import json
 from typing import List, Dict, Any
-from langchain_core.documents import Document   
+from langchain_core.documents import Document  
+from langchain_ollama import OllamaEmbeddings
+
+_EMBEDDINGS = None  # Global variable to store the single instance
+
+def get_embeddings():
+    global _EMBEDDINGS
+    if _EMBEDDINGS is None:  # First time? Create it
+        print("Loading model (only once!)")
+        _EMBEDDINGS = OllamaEmbeddings(model="llama3.2:3b")
+    return _EMBEDDINGS  # Return the same instance every time
 
 def format_search_results(search_results: dict) -> str:
+    print("format_search_results called")
     """Convert similarity search results into clean text for the LLM"""
     context = ""
 
@@ -37,15 +48,15 @@ def format_search_results(search_results: dict) -> str:
 def no_doc_similarity_search(question:str, content: str, headings:list[str], codeblocks: list[str], links: list[str]) -> dict:
     """return a similarity search with the question"""
 
+    print("no doc similarity search called")
+
     similars = {
         "content" : [],
         "headings" : [],
         "codeblocks" : [],
         "links" : []
     }
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embeddings = get_embeddings()
 
     #similar content retrieval
     content_splitter = RecursiveCharacterTextSplitter(
@@ -109,6 +120,7 @@ def chunk_openapi_dict(
     meaningful chunks (one per endpoint).
     """
     
+    print("chunk openapi dict called")
     documents: List[Document] = []
     spec = openapi_dict   # Just for easier reading
 
@@ -190,19 +202,20 @@ Responses:
     return final_documents
 
 def openapi_schema_similarity_search(question:str, openapi_schema: dict) -> List[Document]:
+    print("openapi_schema_similarity_search called")
     similars = []
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embeddings = get_embeddings()
 
     chunks = chunk_openapi_dict(
         openapi_dict= openapi_schema,
         source_name="user_openapi_spec",
         max_chunk_size=1100
     )
-
-    vector_store = FAISS.from_documents(chunks, embeddings)
+    print("finish chunking")
+    vector_store = FAISS.from_documents(chunks, embeddings)     #this takes time
+    print("start retrieving")
     retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+    print("finish retrieving")
     docs = retriever.invoke(question)
 
     return docs
@@ -210,12 +223,14 @@ def openapi_schema_similarity_search(question:str, openapi_schema: dict) -> List
 
 def format_openapi_results(docs: list[Document]) -> str:
     """Convert retrieved OpenAPI documents into clean text for the LLM"""
+
+    print("format_openapi_results called")
     if not docs:
         return "No relevant endpoints found in the API specification."
 
     context = "**Relevant API Endpoints:**\n\n"
     
-    for i, doc in enumerate(docs, 1):
+    for i, doc in enumerate(docs, 1):           #this takes time
         context += f"{i}. {doc.page_content}\n\n"
     
     return context.strip()
