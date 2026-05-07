@@ -6,7 +6,7 @@ from typing import Any
 class DataBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
-    messages: Any
+    messages: list[Any]
     url: str = Field(min_length=1)
 
     title: str = Field(min_length=1)
@@ -20,10 +20,10 @@ class DataBase(BaseModel):
     is_json_hidden: bool
 
     found_hidden_json_url: str | None = Field(default=None, min_length=1)
-    openapi_url: str | None = Field(default=None, min_length=1)
-
     openapi_schema: dict | None = Field(default= None)
     schema_source: str | None = Field(default=None, min_length=1)
+    endpoints: list[str]
+    examples: list[str]
 
 
 class DataResponse(DataBase):
