@@ -80,6 +80,7 @@ function loadPageData() {
 
         // ✅ Ensure structure matches backend expectations
         pageData = {
+            messages: [],
             url: response.url || '',
             title: response.title || 'Untitled',
             content: response.content || '',
@@ -90,15 +91,42 @@ function loadPageData() {
             is_openapi: response.is_openapi ?? false,
             is_json_hidden: response.is_json_hidden ?? false,
             found_hidden_json_url: response.found_hidden_json_url || null,
-            openapi_url: response.openapi_url || null
+            openapi_schema: response.openapi_schema || null,
+            schema_source: response.schema_source || null,
+            endpoints: response.endpoints || [],
+            examples: response.examples || []
         };
 
         pageTitleEl.textContent = pageData.title.slice(0, 40);
 
-        addMessage(
-            'AI',
-            `Page loaded: ${pageData.title}\n\nDocs: ${pageData.is_docs} | OpenAPI: ${pageData.is_openapi}`
-        );
+        // Show appropriate status message
+        let statusMessage = `Page loaded: ${pageData.title}\n\n`;
+        
+        if (pageData.openapi_schema) {
+            // Raw JSON file
+            statusMessage += `📄 Raw OpenAPI JSON file detected!\n`;
+            const endpointCount = pageData.openapi_schema.paths ? 
+                Object.keys(pageData.openapi_schema.paths).length : 0;
+            statusMessage += `📊 Found ${endpointCount} endpoints\n`;
+            statusMessage += `✨ Ask me anything about this API!`;
+        } else if (pageData.is_openapi && pageData.is_json_hidden) {
+            // Swagger UI with hidden JSON
+            statusMessage += `🔍 Swagger/OpenAPI UI detected\n`;
+            if (pageData.found_hidden_json_url) {
+                statusMessage += `📍 Hidden JSON URL found: ${pageData.found_hidden_json_url}\n`;
+                statusMessage += `✨ Ask me anything about this API!`;
+            } else {
+                statusMessage += `⚠️ Could not find JSON URL. I'll answer from visible content.`;
+            }
+        } else if (pageData.is_docs) {
+            statusMessage += `📚 Technical documentation detected\n`;
+            statusMessage += `💡 I can help answer questions about this page's content.`;
+        } else {
+            statusMessage += `🌐 General webpage\n`;
+            statusMessage += `💡 I can answer questions using general knowledge and page content.`;
+        }
+        
+        addMessage('AI', statusMessage);
     });
 }
 
@@ -127,15 +155,21 @@ messageForm.addEventListener('submit', (e) => {
     const timeout = setTimeout(() => {
         removeLoading(loadingId);
         addMessage('AI', '⏳ Request timed out. Try again.');
-    }, 15000);
+    }, 30000);
 
-    chrome.runtime.sendMessage(
-        {
-            action: 'askQuestion',
-            question,
-            ...pageData
-        },
-        (response) => {
+    const payload = {
+        action: 'askQuestion',
+        question,
+        ...pageData,
+        messages: [
+            {
+                role: 'user',
+                content: question
+            }
+        ]
+    };
+
+    chrome.runtime.sendMessage(payload, (response) => {
             clearTimeout(timeout);
             removeLoading(loadingId);
 

@@ -3,7 +3,7 @@
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1. Get page data from content script
-    if (message.action === 'getPageData') { //Popup → background.js → content script → background.js → popup
+    if (message.action === 'getPageData') {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (!tabs || tabs.length === 0) {
                 sendResponse({ error: 'No active tab found' });
@@ -12,7 +12,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             const tabId = tabs[0].id;
 
-            // Forward request to content script on current tab
             chrome.tabs.sendMessage(tabId, { action: 'extractData' }, (response) => {
                 if (chrome.runtime.lastError || !response) {
                     sendResponse({ 
@@ -24,26 +23,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
         });
         
-        return true; // Required for async sendResponse
+        return true;
     }
 
     // 2. Send question + page data to your FastAPI backend
-    if (message.action === 'askQuestion') { //Popup → background.js → FastAPI → background.js → popup
-        const { question, url, title, content, links } = message;
+    if (message.action === 'askQuestion') {
+        const {
+            messages,
+            url,
+            title,
+            content,
+            headings,
+            code_blocks,
+            links,
+            is_docs,
+            is_openapi,
+            is_json_hidden,
+            found_hidden_json_url,
+            openapi_schema,
+            schema_source,
+            endpoints,
+            examples
+        } = message;
 
-        // POST to your local FastAPI endpoint[](http://localhost:8000/ask)
-        fetch('http://localhost:8000/ask', {
+        // POST to your local FastAPI endpoint
+        fetch('http://localhost:8000/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
             body: JSON.stringify({
-                question: question,
-                url: url,
-                title: title,
-                content: content,
-                links: links
+                messages,
+                url,
+                title,
+                content,
+                headings,
+                code_blocks,
+                links,
+                is_docs,
+                is_openapi,
+                is_json_hidden,
+                found_hidden_json_url,  // Only populated for Swagger UI pages
+                openapi_schema,          // Only populated for raw JSON files
+                schema_source,
+                endpoints,
+                examples
             })
         })
         .then(async (res) => {
@@ -54,7 +79,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return res.json();
         })
         .then((apiData) => {
-            // Backend can return { answer: "..." } or { response: "..." } or plain text
             const answer = apiData.answer || 
                           apiData.response || 
                           apiData.message || 
@@ -69,6 +93,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
         });
 
-        return true; // Required for async sendResponse
+        return true;
     }
 });

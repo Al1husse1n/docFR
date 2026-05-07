@@ -27,20 +27,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return score >= 3 || url.toLowerCase().includes("docs");
     };
 
-    // 🧠 Detect Swagger/OpenAPI UI
-    const detectSwagger = () => {
+    // 🧠 Detect if the page itself IS a raw OpenAPI JSON file
+    const detectRawOpenApiJson = () => {
+        // Check content type
+        const contentType = document.contentType || '';
+        const isJsonContentType = contentType.includes('application/json');
+        
+        // Check URL patterns for JSON files
+        const url = window.location.href;
+        const isJsonUrl = url.includes('.json') || 
+                         url.includes('openapi') || 
+                         url.includes('swagger');
+        
+        // Try to parse body as JSON
+        try {
+            const bodyText = document.body.innerText || '';
+            const jsonContent = JSON.parse(bodyText);
+            
+            // Check if parsed JSON is OpenAPI/Swagger
+            if (jsonContent.openapi || jsonContent.swagger || 
+                (jsonContent.paths && jsonContent.info)) {
+                return { isRawJson: true, content: jsonContent };
+            }
+        } catch (e) {
+            // Not valid JSON
+        }
+        
+        return { isRawJson: isJsonContentType && isJsonUrl, content: null };
+    };
+
+    // 🧠 Detect Swagger/OpenAPI UI (HTML pages, not raw JSON)
+    const detectSwaggerUI = () => {
         const html = document.documentElement.innerHTML.toLowerCase();
 
         return (
             html.includes("swagger-ui") ||
             html.includes("swaggeruibundle") ||
-            html.includes("openapi") ||
             html.includes("redoc")
         );
     };
 
-    // 🔥 Extract OpenAPI JSON URL (hidden or embedded)
-    const extractOpenAPIUrl = () => {
+    // 🔥 Extract OpenAPI JSON URL from Swagger UI pages (hidden in scripts)
+    const extractOpenAPIUrlFromUI = () => {
         let foundUrl = null;
 
         // 1️⃣ Scan script tags (most reliable)
@@ -97,7 +125,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return foundUrl;
     };
 
-    // 🧠 Extract main page content
+    // 🧠 Extract main page content (for non-JSON pages)
     const extractMainContent = () => {
         const main =
             document.querySelector('main') ||
@@ -151,47 +179,93 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const url = window.location.href;
         const title = document.title || 'Untitled Page';
-
-        const content = extractMainContent();
-        const headings = extractHeadings();
-        const code_blocks = extractCodeBlocks();
-        const links = extractLinks();
-
-        const is_docs = detectDocs(content, url);
-        const is_openapi = detectSwagger();
-
-        let found_hidden_json_url = null;
+        
+        // Check if this page IS a raw OpenAPI JSON file
+        const { isRawJson, content: jsonContent } = detectRawOpenApiJson();
+        
+        let openapi_schema = null;
+        let is_openapi = false;
         let is_json_hidden = false;
-
-        if (is_openapi) {
-            found_hidden_json_url = extractOpenAPIUrl();
-
-            if (found_hidden_json_url) {
-                is_json_hidden = true;
+        let found_hidden_json_url = null;
+        let schema_source = null;
+        let content = '';
+        let headings = [];
+        let code_blocks = [];
+        let links = [];
+        let is_docs = false;
+        
+        if (isRawJson && jsonContent) {
+            // Page IS a raw OpenAPI JSON file
+            openapi_schema = jsonContent;
+            is_openapi = true;
+            is_json_hidden = false;  // NOT hidden - it's the actual JSON file
+            schema_source = "raw_json_file";
+            content = JSON.stringify(openapi_schema, null, 2).slice(0, 5000);
+            is_docs = true;
+            console.log("✅ Direct raw OpenAPI JSON file detected");
+        } else {
+            // Page is HTML - check if it's Swagger UI
+            const has_swagger_ui = detectSwaggerUI();
+            
+            if (has_swagger_ui) {
+                is_openapi = true;
+                is_json_hidden = true;  // TRUE because it's hidden in UI, not raw JSON
+                found_hidden_json_url = extractOpenAPIUrlFromUI();
+                
+                if (found_hidden_json_url) {
+                    schema_source = "swagger_ui_with_url";
+                    console.log(`✅ Swagger UI detected, found hidden JSON URL: ${found_hidden_json_url}`);
+                } else {
+                    schema_source = "swagger_ui_no_url";
+                    console.log("⚠️ Swagger UI detected but no JSON URL found");
+                }
+                
+                // Extract page content for context
+                content = extractMainContent();
+                headings = extractHeadings();
+                code_blocks = extractCodeBlocks();
+                links = extractLinks();
+                is_docs = detectDocs(content, url);
+            } else {
+                // Regular webpage
+                is_openapi = false;
+                is_json_hidden = false;
+                found_hidden_json_url = null;
+                schema_source = null;
+                content = extractMainContent();
+                headings = extractHeadings();
+                code_blocks = extractCodeBlocks();
+                links = extractLinks();
+                is_docs = detectDocs(content, url);
             }
         }
 
-        // ✅ Final structured output (STRICTLY aligned with backend)
+        // ✅ Final structured output
         const data = {
             url,
             title,
-
             content,
             headings: headings || [],
             code_blocks: code_blocks || [],
             links: links || [],
-
             is_docs: !!is_docs,
             is_openapi: !!is_openapi,
-            is_json_hidden: !!is_json_hidden,
-
+            is_json_hidden: is_json_hidden,  // TRUE when OpenAPI is found in HTML UI (not raw JSON)
             found_hidden_json_url: found_hidden_json_url || null,
-            openapi_url: found_hidden_json_url || null,
-
+            openapi_schema: openapi_schema,  // Actual JSON only for raw JSON files
+            schema_source: schema_source,
             endpoints: [],
             examples: []
         };
 
+        console.log("📤 Sending data to background:", {
+            is_openapi: data.is_openapi,
+            is_json_hidden: data.is_json_hidden,
+            has_openapi_schema: !!data.openapi_schema,
+            found_hidden_json_url: data.found_hidden_json_url,
+            schema_source: data.schema_source
+        });
+        
         sendResponse(data);
     };
 
