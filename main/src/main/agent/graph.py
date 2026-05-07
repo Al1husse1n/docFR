@@ -34,7 +34,6 @@ class AgentState(TypedDict):
     is_openapi: bool
     is_json_hidden: bool
     found_hidden_json_url: str | None
-    openapi_url: str | None
     openapi_schema: dict | None                                                 
     schema_source: str | None   #Direct or hidden
     
